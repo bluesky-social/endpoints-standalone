@@ -144,21 +144,29 @@ const HTML = `<!doctype html>
           container.appendChild(a);
         }
 
-        // The Jetstream live-stream cards (/subscribe, /subscribe-v2) are
-        // synthetic GET operations whose connection upgrades to a WebSocket. We
-        // (1) hide their Test Request button (a plain in-page GET would just
-        // fail) and (2) relabel + recolor the method badge GET -> WSS so they
-        // read as the WebSocket endpoints they are.
+        // The Jetstream live-stream card (/subscribe) is a synthetic GET operation
+        // whose connection upgrades to a WebSocket. We (1) hide its Test Request
+        // button (a plain in-page GET would just fail) and (2) relabel + recolor
+        // the method badge GET -> WSS so it reads as the WebSocket endpoint it is.
         //
-        // They're identified by Scalar's stable section id, which embeds the tag
-        // slug: e.g. "jetstream/tag/live-stream-websocket/GET/subscribe". Plain
-        // indexOf, never a regex — this whole page is a JS template literal, so a
-        // regex literal's backslashes get eaten before they reach the browser.
-        var WS_SECTION_MARK = 'live-stream-websocket';
+        // Detection is by PATH, not by tag name: walking up from a badge/button,
+        // the nearest ancestor that mentions a path tells us which op it is — the
+        // live stream shows "/subscribe", every archive/XRPC op shows "/xrpc/".
+        // (An earlier version keyed off the tag-slug section id and broke when the
+        // tag's wording was edited; the path is stable.) Plain indexOf, never a
+        // regex — this whole page is a JS template literal, so a regex literal's
+        // backslashes get eaten before they reach the browser.
         var WSS_COLOR = '#8b5cf6'; // violet — distinct from GET/POST/etc.
 
-        function isWebsocketSection(section) {
-          return (section.id || '').indexOf(WS_SECTION_MARK) !== -1;
+        function belongsToWebsocketOp(el) {
+          var node = el;
+          for (var i = 0; i < 10 && node; i++) {
+            var txt = node.textContent || '';
+            if (txt.indexOf('/xrpc/') !== -1) return false;   // an archive/XRPC op
+            if (txt.indexOf('/subscribe') !== -1) return true; // the live stream
+            node = node.parentElement;
+          }
+          return false;
         }
 
         function hideUntestableButtons(root) {
@@ -168,20 +176,18 @@ const HTML = `<!doctype html>
             var btn = section.querySelector('.show-api-client-button');
             if (!btn) continue;
             var hasBadge = !!section.querySelector('.security-requirement-badge');
-            btn.style.display = (hasBadge || isWebsocketSection(section)) ? 'none' : '';
+            btn.style.display = (hasBadge || belongsToWebsocketOp(btn)) ? 'none' : '';
           }
         }
 
         // Rewrite the GET pill to WSS everywhere it appears for the live-stream
-        // cards. Scalar renders the method verb in three places, each its own
-        // element with a different shape:
+        // card. Scalar renders the method verb in three element shapes:
         //   - operation header (.request-method) and tag-overview "category head"
         //     (.endpoint-method): a plain text node, color via an inline color.
         //   - sidebar nav entry (.sidebar-heading-type): a visible text node
-        //     preceded by an sr-only label, color via a --method-color CSS
-        //     custom property.
-        // setWss handles both: it rewrites only the visible (non-empty) text node
-        // — preserving the sr-only span — and sets every color hook we've seen.
+        //     preceded by an sr-only label, color via a --method-color CSS prop.
+        // setWss handles all: it rewrites only the visible (non-empty) text node
+        // — preserving any sr-only span — and sets every color hook we've seen.
         // Guarded on text so the edit doesn't churn the observer.
         function setWss(el) {
           var changed = false;
@@ -197,32 +203,12 @@ const HTML = `<!doctype html>
           el.style.setProperty('--method-color', WSS_COLOR);
         }
 
-        // The sidebar row text for an operation contains its path; the live-stream
-        // op is "/subscribe", while the archive ops are "/xrpc/...". So a row that
-        // mentions /subscribe but not /xrpc/ is the live-stream entry.
-        function sidebarRowIsWebsocket(el) {
-          var node = el;
-          for (var i = 0; i < 5 && node.parentElement; i++) {
-            node = node.parentElement;
-            var txt = node.textContent || '';
-            if (txt.indexOf('/subscribe') !== -1) return txt.indexOf('/xrpc/') === -1;
-            if (txt.indexOf('/xrpc/') !== -1) return false;
-          }
-          return false;
-        }
-
         function markWebsocketMethod(root) {
-          root = root || document;
-          // Header + category-head pills live inside the live-stream sections.
-          var badges = root.querySelectorAll('.request-method, .endpoint-method');
+          var badges = (root || document).querySelectorAll(
+            '.request-method, .endpoint-method, .sidebar-heading-type',
+          );
           for (var i = 0; i < badges.length; i++) {
-            var section = badges[i].closest && badges[i].closest('section.section');
-            if (section && isWebsocketSection(section)) setWss(badges[i]);
-          }
-          // Sidebar nav pills sit outside any section; match by the row's path.
-          var navBadges = root.querySelectorAll('.sidebar-heading-type');
-          for (var j = 0; j < navBadges.length; j++) {
-            if (sidebarRowIsWebsocket(navBadges[j])) setWss(navBadges[j]);
+            if (belongsToWebsocketOp(badges[i])) setWss(badges[i]);
           }
         }
 
