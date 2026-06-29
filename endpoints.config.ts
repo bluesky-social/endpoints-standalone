@@ -20,6 +20,12 @@ export const INCLUDE_PREFIXES: string[] = [
   "com.atproto.",
   "chat.bsky.",
   "tools.ozone.",
+  // Jetstream v2 archive/backfill XRPC. NOT enumerated by `npm run seed` — these
+  // lexicons aren't published on-network yet, so they're hand-vendored under
+  // `vendored-lexicons/` (see that dir's README for the "fetch on-network" TODO).
+  // The live websocket stream has no lexicon; see JETSTREAM_WEBSOCKET_PATHS in
+  // build-openapi.ts.
+  "network.bsky.jetstream.",
 ];
 
 /**
@@ -87,6 +93,7 @@ export const NAMESPACE_ORDER: string[] = [
   "com.atproto.",
   "chat.bsky.",
   "tools.ozone.",
+  "network.bsky.",
 ];
 
 /**
@@ -109,5 +116,8 @@ export const VIEWS: View[] = [
   { slug: "bluesky-app", title: "Bluesky App", prefixes: ["app.bsky.", "com.atproto."] },
   { slug: "bluesky-dms", title: "Bluesky DMs", prefixes: ["chat.bsky."] },
   { slug: "ozone-moderation", title: "Ozone Moderation", prefixes: ["tools.ozone."] },
+  // Jetstream v2: the archive/backfill XRPC methods (network.bsky.jetstream.*,
+  // vendored) plus the hand-authored websocket cards injected in build-openapi.ts.
+  { slug: "jetstream", title: "Jetstream API", prefixes: ["network.bsky.jetstream."] },
 ];
 

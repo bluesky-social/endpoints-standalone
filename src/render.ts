@@ -144,20 +144,29 @@ const HTML = `<!doctype html>
           container.appendChild(a);
         }
 
-        function hideAuthTestButtons(root) {
+        // The Jetstream WebSocket cards (/subscribe, /subscribe-v2) are
+        // synthetic GET operations — the connection upgrades to a WebSocket, so
+        // a plain in-page GET would just fail. We hide their Test Request button
+        // too. They're identified by the "(WebSocket)" suffix in the operation
+        // summary that build-openapi.ts gives them (no real endpoint has that),
+        // which is specific enough that no active-document guard is needed.
+        var WEBSOCKET_SUMMARY = /\/subscribe(?:-v2)?\s*\(WebSocket\)/;
+
+        function hideUntestableButtons(root) {
           var sections = (root || document).querySelectorAll('section.section');
           for (var i = 0; i < sections.length; i++) {
             var section = sections[i];
             var btn = section.querySelector('.show-api-client-button');
             if (!btn) continue;
             var hasBadge = !!section.querySelector('.security-requirement-badge');
-            btn.style.display = hasBadge ? 'none' : '';
+            var isWebsocket = WEBSOCKET_SUMMARY.test(section.textContent || '');
+            btn.style.display = (hasBadge || isWebsocket) ? 'none' : '';
           }
         }
 
         function tick() {
           ensureDocsLink();
-          hideAuthTestButtons();
+          hideUntestableButtons();
         }
 
         // Scalar mounts the sidebar and operations asynchronously and may

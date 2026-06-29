@@ -108,7 +108,17 @@ import {
   type View,
 } from "../endpoints.config";
 
-const LEXICONS_DIR = resolve(process.cwd(), "lexicons");
+/**
+ * Lexicon source trees, globbed in order. `lexicons/` is managed by `npm run
+ * seed` + `@atproto/lex` (on-network, CID-pinned). `vendored-lexicons/` holds
+ * hand-copied documents that aren't resolvable on-network yet (Jetstream v2's
+ * `network.bsky.jetstream.*`) — kept separate because `seed-allowlist.ts`
+ * `rmSync`s `lexicons/` on every run. See `vendored-lexicons/README.md`.
+ */
+const LEXICON_DIRS = [
+  resolve(process.cwd(), "lexicons"),
+  resolve(process.cwd(), "vendored-lexicons"),
+];
 
 /**
  * Endpoints the live network answers with `501 MethodNotImplemented`, discovered by
@@ -147,7 +157,227 @@ const SHARED_DESCRIPTION = [
     "- **Authenticated requests should be sent to the user's own PDS**. The PDS validates the session and, if needed, proxies the request to the correct backend. Proxied requests should [include an `atproto-proxy` header](https://atproto.com/specs/xrpc#service-proxying). [Bluesky DMs](#bluesky-dms/description/introduction) and [Ozone Moderation](#ozone-moderation/description/introduction) requests always require proxying.",
   ].join("\n"),
   "For client libraries that handle session management and proxying for you, see the [AT Protocol SDKs](https://atproto.com/sdks).",
+  "To consume the whole network as a live, filterable JSON firehose (or backfill a historical slice of it), see the [Jetstream API](#jetstream/description/introduction).",
 ].join("\n\n");
+
+/** Public Bluesky-hosted Jetstream hosts (archive XRPC over https, live stream over wss). */
+const JETSTREAM_HOST = "jetstream.us-west.bsky.network";
+
+/**
+ * Per-view Introduction for the Jetstream API document. Jetstream isn't a PDS
+ * service — it's a standalone full-network archive + live JSON firehose — so it
+ * gets its own intro rather than the shared auth/proxy guidance.
+ */
+const JETSTREAM_DESCRIPTION = [
+  "[Jetstream](https://github.com/bluesky-social/jetstream) is a full-network archive and live-streaming service for AT Protocol. It ingests every record from the network and re-serves it as an easy-to-consume, filterable JSON stream — the same WebSocket payload as the original Jetstream — plus a downloadable, CDN-friendly binary archive for fast historical backfill.",
+  "This document covers two surfaces:",
+  [
+    "- **The live stream** — [`/subscribe`](#jetstream/operation/network.bsky.jetstream.subscribe) and [`/subscribe-v2`](#jetstream/operation/network.bsky.jetstream.subscribeV2). A WebSocket of decoded JSON events (no CBOR decoder required), filterable by collection and DID. This is what the vast majority of consumers want; existing Jetstream clients work unchanged.",
+    "- **The archive** — the `network.bsky.jetstream.*` XRPC methods below. Ordinary HTTP queries/procedures for planning and downloading the sealed binary archive (segments, blocks, and the compaction tombstone overlay). Driving these directly is involved — most callers use the official Go/TypeScript client libraries, which negotiate the archive download and cut over to the live stream transparently.",
+  ].join("\n"),
+  "## Hosts and scope",
+  `The Bluesky-hosted instances are at \`jetstream.us-west.bsky.network\` and \`jetstream.us-east.bsky.network\` (self-hosters substitute their own host). The live stream is unauthenticated. Cursors are instance-local, so on failover to a different host, rewind your cursor slightly and rely on at-least-once delivery.`,
+  "> **Note:** the `network.bsky.jetstream.*` lexicons are not yet published on-network; they're vendored into this reference by hand. The live `/subscribe` endpoints have no Lexicon at all (a WebSocket can't be expressed in a Lexicon today), so they're documented here as hand-authored cards.",
+].join("\n\n");
+
+// ---------------------------------------------------------------------------
+// Servers (per view). app.bsky/com.atproto reads default to the public AppView
+// or the user's PDS; the relay (bsky.network) is added wherever com.atproto.sync
+// methods live, since it's the only public host that serves them (the AppView
+// 501s sync methods, the PDS auth-gates them). Jetstream lives on its own hosts.
+// ---------------------------------------------------------------------------
+const APPVIEW_SERVER: OpenAPIV3_1.ServerObject = {
+  url: "https://public.api.bsky.app",
+  description: "Public Bluesky AppView. Use this for unauthenticated `app.bsky.*` reads — no token required.",
+};
+
+const PDS_SERVER: OpenAPIV3_1.ServerObject = {
+  url: "https://{host}",
+  description:
+    "Provide your PDS hostname. Use `bsky.social` if your account is hosted by Bluesky; replace it with your own PDS hostname (e.g. `pds.example.com`) if you're self-hosted. The PDS handles auth and proxies `app.bsky` / `chat.bsky` / `tools.ozone` calls onward. To get a token to make requests from this page, call `com.atproto.server.createSession` with your handle and an [app password](https://bsky.app/settings/app-passwords), and paste the returned `accessJwt` into the **Authentication** panel below. The token is then attached to every test request automatically.",
+  variables: {
+    host: { default: "bsky.social" },
+  },
+};
+
+const RELAY_SERVER: OpenAPIV3_1.ServerObject = {
+  url: "https://bsky.network",
+  description:
+    "Public Bluesky relay. Serves the `com.atproto.sync.*` repo-sync reads (`listRepos`, `getRepo`, `listReposByCollection`, …) unauthenticated — the AppView returns `501 MethodNotImplemented` for these and the PDS requires auth, so the relay is the host to pick when testing a `com.atproto.sync` method.",
+};
+
+const JETSTREAM_SERVERS: OpenAPIV3_1.ServerObject[] = [
+  {
+    url: "https://jetstream.us-west.bsky.network",
+    description:
+      "Bluesky-hosted Jetstream (US-West). Archive XRPC (`network.bsky.jetstream.*`) is served over HTTPS here; the live stream is the same host over `wss://` (`/subscribe`).",
+  },
+  {
+    url: "https://jetstream.us-east.bsky.network",
+    description: "Bluesky-hosted Jetstream (US-East).",
+  },
+];
+
+function serversFor(view: View): OpenAPIV3_1.ServerObject[] {
+  if (view.slug === "jetstream") return JETSTREAM_SERVERS;
+  const list = [APPVIEW_SERVER, PDS_SERVER];
+  if (view.prefixes.some((p) => p.startsWith("com.atproto."))) list.push(RELAY_SERVER);
+  return list;
+}
+
+function descriptionFor(view: View): string {
+  return view.slug === "jetstream" ? JETSTREAM_DESCRIPTION : SHARED_DESCRIPTION;
+}
+
+/** Code-sample options for an endpoint: Jetstream archive XRPC targets its own
+ *  host and has no SDK wrapper, so emit curl only. Everything else uses the
+ *  SDK-backed defaults (TS/Go/curl against bsky.social). */
+function codeSampleOptsFor(id: string) {
+  if (id.startsWith("network.bsky.jetstream.")) {
+    return { curlHost: JETSTREAM_HOST, only: ["shell" as const], auth: false };
+  }
+  return {};
+}
+
+// ---------------------------------------------------------------------------
+// Hand-authored WebSocket cards. Jetstream's live stream has no Lexicon, and
+// OpenAPI/Scalar can't model a WebSocket — but the connection *handshake* is an
+// HTTP GET (the route is literally `GET /subscribe`), so we document it as a GET
+// whose query params are the real subscription options and whose response is the
+// upgraded stream of JSON event frames. render.ts hides the in-page "Test
+// Request" button on these (a plain GET without the Upgrade header just fails).
+// Param/contract source: ../jetstream internal/subscribe/{handler,filter}.go.
+// ---------------------------------------------------------------------------
+const WS_EVENT_EXAMPLE = `\`\`\`json
+{
+  "did": "did:plc:eygmaihciaxprqvxpfvl6flk",
+  "time_us": 1725911162329308,
+  "cursor": 12345,
+  "kind": "commit",
+  "commit": {
+    "rev": "3l3qo2vutsw2b",
+    "operation": "create",
+    "collection": "app.bsky.feed.like",
+    "rkey": "3l3qo2vuowo2b",
+    "cid": "bafyreidwaivazkwu67xztlmuobx35hs2lnfh3kolmgfmucldvhd3sgzcqi",
+    "record": { "$type": "app.bsky.feed.like", "createdAt": "2024-09-09T19:46:02.102Z" }
+  }
+}
+\`\`\``;
+
+const WS_QUERY_PARAMS: OpenAPIV3_1.ParameterObject[] = [
+  {
+    name: "wantedCollections",
+    in: "query",
+    required: false,
+    description:
+      "Collections to receive `#commit` events for. Repeatable. Each value is an exact NSID (`app.bsky.feed.post`) or a namespace wildcard ending in `.*` (`app.bsky.feed.*`). Up to 100 entries; omit for all collections. Applies to commits only.",
+    schema: { type: "array", items: { type: "string" } },
+  },
+  {
+    name: "wantedDids",
+    in: "query",
+    required: false,
+    description: "DIDs to receive events for, across all event kinds. Repeatable, up to 10,000 entries. Omit for all repos.",
+    schema: { type: "array", items: { type: "string", format: "did" } },
+  },
+  {
+    name: "cursor",
+    in: "query",
+    required: false,
+    description:
+      "Resume point. A value below 1×10¹⁵ is a Jetstream sequence number (`cursor=0` replays from the start of the replay window); a value at or above 1×10¹⁵ is read as a v1 unix-microsecond timestamp (backwards compatibility). Replay is bounded to the most recent 36h by default — older cursors clamp to the floor, future cursors start at the live tip. Omit to start live.",
+    schema: { type: "integer", format: "int64", minimum: 0 },
+  },
+  {
+    name: "extended",
+    in: "query",
+    required: false,
+    description:
+      "Set `true` for the extended payload: a strict superset adding `seq`, `upstream_relay_cursor`, `commit.record_cbor` (base64 DAG-CBOR), `sync.blocks` (base64 CAR), and interleaved control events (`segment_sealed`, `segment_compacted`, `heartbeat`). Heavier to produce and may be more strictly rate-limited.",
+    schema: { type: "boolean", default: false },
+  },
+  {
+    name: "maxMessageSizeBytes",
+    in: "query",
+    required: false,
+    description: "Drop any event whose uncompressed JSON exceeds this size. `0` or omitted means no cap.",
+    schema: { type: "integer", minimum: 0, default: 0 },
+  },
+  {
+    name: "compress",
+    in: "query",
+    required: false,
+    description:
+      "Set `true` to opt into Jetstream's legacy custom zstd-dictionary compression (frames arrive as binary WebSocket messages). Kept for v1 compatibility only — prefer RFC 7692 `permessage-deflate`, which is negotiated automatically. Offering both at once is rejected.",
+    schema: { type: "boolean", default: false },
+  },
+  {
+    name: "requireHello",
+    in: "query",
+    required: false,
+    description:
+      "Set `true` to withhold all events until the client sends its first `options_update` message, so the filter can be set before any data flows.",
+    schema: { type: "boolean", default: false },
+  },
+];
+
+function jetstreamSubscribeOp(path: string, v2: boolean): OpenAPIV3_1.OperationObject {
+  const policy = v2
+    ? "**`/subscribe-v2`** uses the more intuitive delivery policy: when a collection filter is set, `#identity` events are not delivered and Sync 1.1 resync replacement rows are emitted. `#account` events are always delivered (they carry the DID-deletion tombstone consumers need)."
+    : "**`/subscribe`** preserves the original Jetstream v1 contract: regardless of `wantedCollections`, every subscriber still receives `#account` and `#identity` events (gated only by `wantedDids`). Existing v1 clients work unchanged.";
+
+  const description = [
+    `**WebSocket endpoint.** This is not a regular request/response call: the connection opens as an HTTP \`GET ${path}\` with the standard \`Upgrade: websocket\` handshake (RFC 6455), then streams JSON event frames over \`wss://\` for as long as it stays open. The query parameters below are the subscription options; connect with a WebSocket client (see the samples), not the in-page test button.`,
+    "Each frame is one decoded event — `commit`, `identity`, `account`, or `sync` — for example:",
+    WS_EVENT_EXAMPLE,
+    "`time_us` is Jetstream's own ingest timestamp (unix microseconds); `cursor` is its monotonic per-event sequence number — save it and pass `?cursor=N` on reconnect to resume (delivery is at-least-once, so process idempotently).",
+    "Clients may also send `options_update` messages to change the filter mid-stream, e.g. `{\"type\":\"options_update\",\"payload\":{\"wantedCollections\":[\"app.bsky.feed.like\"]}}`.",
+    policy,
+  ].join("\n\n");
+
+  const url = `wss://${JETSTREAM_HOST}${path}?wantedCollections=app.bsky.feed.post`;
+  return {
+    tags: [calculateTag("network.bsky.jetstream.subscribe")],
+    summary: `${path} (WebSocket)`,
+    description,
+    operationId: v2 ? "network.bsky.jetstream.subscribeV2" : "network.bsky.jetstream.subscribe",
+    parameters: WS_QUERY_PARAMS,
+    responses: {
+      "101": {
+        description:
+          "Switching Protocols — the connection upgrades to a WebSocket and JSON event frames stream until either side closes it.",
+      },
+    },
+    "x-codeSamples": [
+      {
+        lang: "shell",
+        label: "websocat",
+        source: `# stream all app.bsky.feed.post commits (Ctrl-C to stop)\nwebsocat '${url}'`,
+      },
+      {
+        lang: "javascript",
+        label: "Browser / Node (ws)",
+        source:
+          `const ws = new WebSocket(\n  '${url}'\n)\n` +
+          `ws.onmessage = (e) => {\n  const evt = JSON.parse(e.data)\n  console.log(evt.kind, evt.did, evt.commit?.collection)\n}\n` +
+          `// change the filter mid-stream:\n` +
+          `// ws.send(JSON.stringify({ type: 'options_update', payload: { wantedCollections: ['app.bsky.feed.like'] } }))`,
+      },
+    ],
+  } as OpenAPIV3_1.OperationObject;
+}
+
+/**
+ * Synthetic WebSocket paths injected into the Jetstream view. Cast through
+ * `unknown` for the same reason the converter loop uses `@ts-ignore` on its
+ * method-keyed PathItem writes: openapi-types' V3_1 PathItemObject references the
+ * V3 OperationObject, whose `exclusiveMaximum`/array typing is incompatible.
+ */
+const JETSTREAM_WEBSOCKET_PATHS = {
+  "/subscribe": { get: jetstreamSubscribeOp("/subscribe", false) },
+  "/subscribe-v2": { get: jetstreamSubscribeOp("/subscribe-v2", true) },
+} as unknown as OpenAPIV3_1.PathsObject;
 
 /** Schema components are shared across views (cross-namespace `$ref`s are common). */
 const components: OpenAPIV3_1.ComponentsObject = {
@@ -214,14 +444,15 @@ function tagGroups(tags: string[]): { name: string; tags: string[] }[] {
 }
 
 async function main() {
-  const entries = await fg("**/*.json", {
-    cwd: LEXICONS_DIR,
-    absolute: true,
-  });
+  const entries: string[] = [];
+  for (const dir of LEXICON_DIRS) {
+    if (!existsSync(dir)) continue;
+    entries.push(...(await fg("**/*.json", { cwd: dir, absolute: true })));
+  }
 
   if (entries.length === 0) {
     throw new Error(
-      `No lexicon JSON found in ${LEXICONS_DIR}. Run \`npm run install-lexicons\` first.`,
+      `No lexicon JSON found in ${LEXICON_DIRS.join(", ")}. Run \`npm run install-lexicons\` first.`,
     );
   }
 
@@ -272,7 +503,7 @@ async function main() {
           if (!view) break;
           const post = convertProcedure(id, name, def);
           if (post) {
-            (post as any)["x-codeSamples"] = codeSamplesFor(id, def);
+            (post as any)["x-codeSamples"] = codeSamplesFor(id, def, codeSampleOptsFor(id));
             injectProxyHeader(post, id);
             injectSecurity(post, id, def);
             // @ts-ignore method-keyed PathItem
@@ -290,7 +521,7 @@ async function main() {
           if (!view) break;
           const get = convertQuery(id, name, def);
           if (get) {
-            (get as any)["x-codeSamples"] = codeSamplesFor(id, def);
+            (get as any)["x-codeSamples"] = codeSamplesFor(id, def, codeSampleOptsFor(id));
             injectProxyHeader(get, id);
             injectSecurity(get, id, def);
             // @ts-ignore method-keyed PathItem
@@ -329,25 +560,17 @@ async function main() {
     }
   }
 
-  const servers: OpenAPIV3_1.ServerObject[] = [
-    {
-      url: "https://public.api.bsky.app",
-      description: "Public Bluesky AppView. Use this for unauthenticated `app.bsky.*` reads — no token required.",
-    },
-    {
-      url: "https://{host}",
-      description:
-        "Provide your PDS hostname. Use `bsky.social` if your account is hosted by Bluesky; replace it with your own PDS hostname (e.g. `pds.example.com`) if you're self-hosted. The PDS handles auth and proxies `app.bsky` / `chat.bsky` / `tools.ozone` calls onward. To get a token to make requests from this page, call `com.atproto.server.createSession` with your handle and an [app password](https://bsky.app/settings/app-passwords), and paste the returned `accessJwt` into the **Authentication** panel below. The token is then attached to every test request automatically.",
-      variables: {
-        host: { default: "bsky.social" },
-      },
-    },
-  ];
+  // The Jetstream live stream has no Lexicon, so its WebSocket cards are
+  // hand-authored (see JETSTREAM_WEBSOCKET_PATHS) and merged in here alongside
+  // the converted `network.bsky.jetstream.*` archive endpoints.
+  Object.assign(viewPaths["jetstream"], JETSTREAM_WEBSOCKET_PATHS);
+  viewTags["jetstream"].add(calculateTag("network.bsky.jetstream.subscribe"));
 
   // One OpenAPI document per view; the renderer surfaces them as a switcher
-  // dropdown. They share the Introduction (`info.description`), servers, and the
-  // full component set (cross-namespace `$ref`s are common, and bundling every
-  // schema in each document keeps those pointers from dangling).
+  // dropdown. They share the full component set (cross-namespace `$ref`s are
+  // common, and bundling every schema in each document keeps those pointers from
+  // dangling); servers and the Introduction are per-view (see serversFor /
+  // descriptionFor).
   for (const view of VIEWS) {
     const tags = sortedTags(viewTags[view.slug]);
     const paths = viewPaths[view.slug];
@@ -357,13 +580,13 @@ async function main() {
       info: {
         title: `Bluesky HTTP API Reference — ${view.title}`,
         summary: "HTTP/XRPC endpoint reference for Bluesky and AT Protocol lexicons.",
-        description: SHARED_DESCRIPTION,
+        description: descriptionFor(view),
         // We don't version this HTTP reference list, so leave it empty: Scalar's
         // InfoVersion badge renders nothing for a falsy version string (a real
         // "0.0.0" would otherwise show a meaningless "v0.0.0" badge by the title).
         version: "",
       },
-      servers,
+      servers: serversFor(view),
       // No document-level `security` array — we only declare it per-operation
       // (via `injectSecurity`) on endpoints flagged by `requiresAuth`. That way
       // Scalar stamps an accurate "Auth Required" badge on the writes/proxied
