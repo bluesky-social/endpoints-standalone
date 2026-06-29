@@ -157,7 +157,7 @@ const SHARED_DESCRIPTION = [
     "- **Authenticated requests should be sent to the user's own PDS**. The PDS validates the session and, if needed, proxies the request to the correct backend. Proxied requests should [include an `atproto-proxy` header](https://atproto.com/specs/xrpc#service-proxying). [Bluesky DMs](#bluesky-dms/description/introduction) and [Ozone Moderation](#ozone-moderation/description/introduction) requests always require proxying.",
   ].join("\n"),
   "For client libraries that handle session management and proxying for you, see the [AT Protocol SDKs](https://atproto.com/sdks).",
-  "To consume the whole network as a live, filterable JSON firehose (or backfill a historical slice of it), see the [Jetstream API](#jetstream/description/introduction).",
+  "To consume the whole network as a live, filterable JSON firehose (or replay a slice of it), see the [Jetstream API](#jetstream/description/introduction).",
 ].join("\n\n");
 
 /** Public Bluesky-hosted Jetstream hosts (archive XRPC over https, live stream over wss). */
@@ -168,12 +168,12 @@ const JETSTREAM_HOST = "jetstream.us-west.bsky.network";
  * `network.bsky.jetstream` archive tag) so they render as a top-level group,
  * placed first in the Jetstream view (see the per-view ordering in main()).
  */
-const JETSTREAM_STREAM_TAG = "Live stream (WebSocket)";
+const JETSTREAM_STREAM_TAG = "Jetstream (WebSocket)";
 
 /** Optional per-tag descriptions, rendered by Scalar as a tag-section intro. */
 const TAG_DESCRIPTIONS: Record<string, string> = {
   [JETSTREAM_STREAM_TAG]:
-    "Jetstream's live JSON firehose. These are **WebSocket** endpoints — connect with a WebSocket client (the in-page test button doesn't apply).",
+    "Jetstream's live JSON firehose. These are **WebSocket** endpoints — connect with a WebSocket client.",
 };
 
 /**
@@ -182,15 +182,14 @@ const TAG_DESCRIPTIONS: Record<string, string> = {
  * gets its own intro rather than the shared auth/proxy guidance.
  */
 const JETSTREAM_DESCRIPTION = [
-  "[Jetstream](https://github.com/bluesky-social/jetstream) is a full-network archive and live-streaming service for AT Protocol. It ingests every record from the network and re-serves it as an easy-to-consume, filterable JSON stream — the same WebSocket payload as the original Jetstream — plus a downloadable, CDN-friendly binary archive for fast historical backfill.",
-  "This document covers two surfaces:",
+  "[Jetstream](https://github.com/bluesky-social/jetstream) is a full-network archive and streaming service for AT Protocol. It ingests every record from the network and re-serves it as an easy-to-consume, filterable JSON stream.",
+  "These docs covers two surfaces:",
   [
-    "- **The live stream** — [`/subscribe`](#jetstream/operation/network.bsky.jetstream.subscribe). A WebSocket of decoded JSON events (no CBOR decoder required), filterable by collection and DID. This is what the vast majority of consumers want; existing Jetstream clients work unchanged. (A `/subscribe-v2` endpoint exists too, wire-identical but with a tweaked delivery policy — see the `/subscribe` card.)",
-    "- **The archive** — the `network.bsky.jetstream.*` XRPC methods below. Ordinary HTTP queries/procedures for planning and downloading the sealed binary archive (segments, blocks, and the compaction tombstone overlay). Driving these directly is involved — most callers use the official Go/TypeScript client libraries, which negotiate the archive download and cut over to the live stream transparently.",
+    "- **The live stream** — [`/subscribe`](#jetstream/tag/jetstream-websocket/GET/subscribe). A WebSocket of decoded JSON events, filterable by collection and DID.",
+    "- **The archive** — the `network.bsky.jetstream.*` XRPC methods below. HTTP queries/procedures for planning and downloading the sealed binary archive.",
   ].join("\n"),
   "## Hosts and scope",
-  `The Bluesky-hosted instances are at \`jetstream.us-west.bsky.network\` and \`jetstream.us-east.bsky.network\` (self-hosters substitute their own host). The live stream is unauthenticated. Cursors are instance-local, so on failover to a different host, rewind your cursor slightly and rely on at-least-once delivery.`,
-  "> **Note:** the `network.bsky.jetstream.*` lexicons are not yet published on-network; they're vendored into this reference by hand. The live `/subscribe` endpoints have no Lexicon at all (a WebSocket can't be expressed in a Lexicon today), so they're documented here as hand-authored cards.",
+  `The Bluesky-hosted instances are at \`jetstream.us-west.bsky.network\` and \`jetstream.us-east.bsky.network\`.`,
 ].join("\n\n");
 
 // ---------------------------------------------------------------------------
@@ -216,18 +215,18 @@ const PDS_SERVER: OpenAPIV3_1.ServerObject = {
 const RELAY_SERVER: OpenAPIV3_1.ServerObject = {
   url: "https://bsky.network",
   description:
-    "Public Bluesky relay. Serves the `com.atproto.sync.*` repo-sync reads (`listRepos`, `getRepo`, `listReposByCollection`, …) unauthenticated — the AppView returns `501 MethodNotImplemented` for these and the PDS requires auth, so the relay is the host to pick when testing a `com.atproto.sync` method.",
+    "Bluesky Relay. Serves the `com.atproto.sync.*` repo-sync reads (`listRepos`, `getRepo`, `listReposByCollection`, …) unauthenticated. Use when testing a `com.atproto.sync` method.",
 };
 
 const JETSTREAM_SERVERS: OpenAPIV3_1.ServerObject[] = [
   {
     url: "https://jetstream.us-west.bsky.network",
     description:
-      "Bluesky-hosted Jetstream (US-West). Archive XRPC (`network.bsky.jetstream.*`) is served over HTTPS here; the live stream is the same host over `wss://` (`/subscribe`).",
+      "Bluesky Jetstream (US-West). XRPC methods (`network.bsky.jetstream.*`) are served via HTTPS; the stream is served via `wss://` (`/subscribe`).",
   },
   {
     url: "https://jetstream.us-east.bsky.network",
-    description: "Bluesky-hosted Jetstream (US-East).",
+    description: "Bluesky Jetstream (US-East).",
   },
 ];
 
@@ -339,16 +338,12 @@ function jetstreamSubscribeOp(): OpenAPIV3_1.OperationObject {
   const path = "/subscribe";
   const url = `wss://${JETSTREAM_HOST}${path}?wantedCollections=app.bsky.feed.post`;
   const description = [
-    `> 🔌 **WebSocket endpoint (\`wss://\`).** This is a persistent event stream, not a request/response call — connect with a WebSocket client (see the samples below), not the in-page **Test Request** button.`,
-    `The connection opens as an HTTP \`GET ${path}\` with the standard \`Upgrade: websocket\` handshake (RFC 6455), then streams JSON event frames over \`wss://${JETSTREAM_HOST}${path}\` for as long as it stays open. The query parameters below are the subscription options.`,
+    `> **WebSocket endpoint (\`wss://\`).** This is a persistent event stream, not a request/response call — connect with a WebSocket client.`,
+    `The connection opens as an HTTP \`GET ${path}\` with the standard \`Upgrade: websocket\` handshake, then streams JSON event frames over \`wss://${JETSTREAM_HOST}${path}\` for as long as it stays open. The query parameters below are the subscription options.`,
     "Each frame is one decoded event — `commit`, `identity`, `account`, or `sync` — for example:",
     WS_EVENT_EXAMPLE,
     "`time_us` is Jetstream's own ingest timestamp (unix microseconds); `cursor` is its monotonic per-event sequence number — save it and pass `?cursor=N` on reconnect to resume (delivery is at-least-once, so process idempotently).",
     "Clients may also send `options_update` messages to change the filter mid-stream, e.g. `{\"type\":\"options_update\",\"payload\":{\"wantedCollections\":[\"app.bsky.feed.like\"]}}`.",
-    // Jetstream also serves `/subscribe-v2`. Today it's wire-identical to this
-    // endpoint (same query params), differing only in delivery policy, so it's
-    // not listed separately — noted here instead.
-    "There is also a `/subscribe-v2` endpoint with the **same query parameters** as this one, differing only in delivery policy: `/subscribe` (this endpoint) preserves the original Jetstream v1 contract — every subscriber receives `#account` and `#identity` events regardless of `wantedCollections` (gated only by `wantedDids`) — whereas `/subscribe-v2` withholds `#identity` events when a collection filter is set and emits Sync 1.1 resync replacement rows. `#account` events are delivered on both. Because they're identical on the wire, only `/subscribe` is documented here.",
   ].join("\n\n");
 
   // No `responses` block: this isn't a request/response operation, and a synthetic
@@ -381,9 +376,7 @@ function jetstreamSubscribeOp(): OpenAPIV3_1.OperationObject {
 }
 
 /**
- * Synthetic WebSocket path injected into the Jetstream view. Only `/subscribe`
- * is listed: `/subscribe-v2` is wire-identical today (same params, different
- * delivery policy) and is noted in the description instead. Cast through
+ * Synthetic WebSocket path injected into the Jetstream view. Cast through
  * `unknown` for the same reason the converter loop uses `@ts-ignore` on its
  * method-keyed PathItem writes: openapi-types' V3_1 PathItemObject references the
  * V3 OperationObject, whose `exclusiveMaximum`/array typing is incompatible.
