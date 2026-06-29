@@ -144,13 +144,22 @@ const HTML = `<!doctype html>
           container.appendChild(a);
         }
 
-        // The Jetstream WebSocket cards (/subscribe, /subscribe-v2) are
-        // synthetic GET operations — the connection upgrades to a WebSocket, so
-        // a plain in-page GET would just fail. We hide their Test Request button
-        // too. They're identified by the "(WebSocket)" suffix in the operation
-        // summary that build-openapi.ts gives them (no real endpoint has that),
-        // which is specific enough that no active-document guard is needed.
-        var WEBSOCKET_SUMMARY = /\/subscribe(?:-v2)?\s*\(WebSocket\)/;
+        // The Jetstream live-stream cards (/subscribe, /subscribe-v2) are
+        // synthetic GET operations whose connection upgrades to a WebSocket. We
+        // (1) hide their Test Request button (a plain in-page GET would just
+        // fail) and (2) relabel + recolor the method badge GET -> WSS so they
+        // read as the WebSocket endpoints they are.
+        //
+        // They're identified by Scalar's stable section id, which embeds the tag
+        // slug: e.g. "jetstream/tag/live-stream-websocket/GET/subscribe". Plain
+        // indexOf, never a regex — this whole page is a JS template literal, so a
+        // regex literal's backslashes get eaten before they reach the browser.
+        var WS_SECTION_MARK = 'live-stream-websocket';
+        var WSS_COLOR = '#8b5cf6'; // violet — distinct from GET/POST/etc.
+
+        function isWebsocketSection(section) {
+          return (section.id || '').indexOf(WS_SECTION_MARK) !== -1;
+        }
 
         function hideUntestableButtons(root) {
           var sections = (root || document).querySelectorAll('section.section');
@@ -159,14 +168,68 @@ const HTML = `<!doctype html>
             var btn = section.querySelector('.show-api-client-button');
             if (!btn) continue;
             var hasBadge = !!section.querySelector('.security-requirement-badge');
-            var isWebsocket = WEBSOCKET_SUMMARY.test(section.textContent || '');
-            btn.style.display = (hasBadge || isWebsocket) ? 'none' : '';
+            btn.style.display = (hasBadge || isWebsocketSection(section)) ? 'none' : '';
+          }
+        }
+
+        // Rewrite the GET pill to WSS everywhere it appears for the live-stream
+        // cards. Scalar renders the method verb in three places, each its own
+        // element with a different shape:
+        //   - operation header (.request-method) and tag-overview "category head"
+        //     (.endpoint-method): a plain text node, color via an inline color.
+        //   - sidebar nav entry (.sidebar-heading-type): a visible text node
+        //     preceded by an sr-only label, color via a --method-color CSS
+        //     custom property.
+        // setWss handles both: it rewrites only the visible (non-empty) text node
+        // — preserving the sr-only span — and sets every color hook we've seen.
+        // Guarded on text so the edit doesn't churn the observer.
+        function setWss(el) {
+          var changed = false;
+          for (var n = 0; n < el.childNodes.length; n++) {
+            var node = el.childNodes[n];
+            if (node.nodeType === 3 && node.nodeValue.trim()) {
+              changed = true;
+              if (node.nodeValue.trim().toLowerCase() !== 'wss') node.nodeValue = 'wss';
+            }
+          }
+          if (!changed && el.textContent.trim().toLowerCase() !== 'wss') el.textContent = 'wss';
+          el.style.color = WSS_COLOR;
+          el.style.setProperty('--method-color', WSS_COLOR);
+        }
+
+        // The sidebar row text for an operation contains its path; the live-stream
+        // op is "/subscribe", while the archive ops are "/xrpc/...". So a row that
+        // mentions /subscribe but not /xrpc/ is the live-stream entry.
+        function sidebarRowIsWebsocket(el) {
+          var node = el;
+          for (var i = 0; i < 5 && node.parentElement; i++) {
+            node = node.parentElement;
+            var txt = node.textContent || '';
+            if (txt.indexOf('/subscribe') !== -1) return txt.indexOf('/xrpc/') === -1;
+            if (txt.indexOf('/xrpc/') !== -1) return false;
+          }
+          return false;
+        }
+
+        function markWebsocketMethod(root) {
+          root = root || document;
+          // Header + category-head pills live inside the live-stream sections.
+          var badges = root.querySelectorAll('.request-method, .endpoint-method');
+          for (var i = 0; i < badges.length; i++) {
+            var section = badges[i].closest && badges[i].closest('section.section');
+            if (section && isWebsocketSection(section)) setWss(badges[i]);
+          }
+          // Sidebar nav pills sit outside any section; match by the row's path.
+          var navBadges = root.querySelectorAll('.sidebar-heading-type');
+          for (var j = 0; j < navBadges.length; j++) {
+            if (sidebarRowIsWebsocket(navBadges[j])) setWss(navBadges[j]);
           }
         }
 
         function tick() {
           ensureDocsLink();
           hideUntestableButtons();
+          markWebsocketMethod();
         }
 
         // Scalar mounts the sidebar and operations asynchronously and may

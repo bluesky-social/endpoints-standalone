@@ -164,6 +164,19 @@ const SHARED_DESCRIPTION = [
 const JETSTREAM_HOST = "jetstream.us-west.bsky.network";
 
 /**
+ * Tag for the live-stream WebSocket cards. They get their own tag (not the
+ * `network.bsky.jetstream` archive tag) so they render as a top-level group,
+ * placed first in the Jetstream view (see the per-view ordering in main()).
+ */
+const JETSTREAM_STREAM_TAG = "Live stream (WebSocket)";
+
+/** Optional per-tag descriptions, rendered by Scalar as a tag-section intro. */
+const TAG_DESCRIPTIONS: Record<string, string> = {
+  [JETSTREAM_STREAM_TAG]:
+    "Jetstream's live JSON firehose. These are **WebSocket** endpoints — connect with a WebSocket client (the in-page test button doesn't apply).",
+};
+
+/**
  * Per-view Introduction for the Jetstream API document. Jetstream isn't a PDS
  * service — it's a standalone full-network archive + live JSON firehose — so it
  * gets its own intro rather than the shared auth/proxy guidance.
@@ -172,7 +185,7 @@ const JETSTREAM_DESCRIPTION = [
   "[Jetstream](https://github.com/bluesky-social/jetstream) is a full-network archive and live-streaming service for AT Protocol. It ingests every record from the network and re-serves it as an easy-to-consume, filterable JSON stream — the same WebSocket payload as the original Jetstream — plus a downloadable, CDN-friendly binary archive for fast historical backfill.",
   "This document covers two surfaces:",
   [
-    "- **The live stream** — [`/subscribe`](#jetstream/operation/network.bsky.jetstream.subscribe) and [`/subscribe-v2`](#jetstream/operation/network.bsky.jetstream.subscribeV2). A WebSocket of decoded JSON events (no CBOR decoder required), filterable by collection and DID. This is what the vast majority of consumers want; existing Jetstream clients work unchanged.",
+    "- **The live stream** — [`/subscribe`](#jetstream/operation/network.bsky.jetstream.subscribe). A WebSocket of decoded JSON events (no CBOR decoder required), filterable by collection and DID. This is what the vast majority of consumers want; existing Jetstream clients work unchanged. (A `/subscribe-v2` endpoint exists too, wire-identical but with a tweaked delivery policy — see the `/subscribe` card.)",
     "- **The archive** — the `network.bsky.jetstream.*` XRPC methods below. Ordinary HTTP queries/procedures for planning and downloading the sealed binary archive (segments, blocks, and the compaction tombstone overlay). Driving these directly is involved — most callers use the official Go/TypeScript client libraries, which negotiate the archive download and cut over to the live stream transparently.",
   ].join("\n"),
   "## Hosts and scope",
@@ -322,33 +335,32 @@ const WS_QUERY_PARAMS: OpenAPIV3_1.ParameterObject[] = [
   },
 ];
 
-function jetstreamSubscribeOp(path: string, v2: boolean): OpenAPIV3_1.OperationObject {
-  const policy = v2
-    ? "**`/subscribe-v2`** uses the more intuitive delivery policy: when a collection filter is set, `#identity` events are not delivered and Sync 1.1 resync replacement rows are emitted. `#account` events are always delivered (they carry the DID-deletion tombstone consumers need)."
-    : "**`/subscribe`** preserves the original Jetstream v1 contract: regardless of `wantedCollections`, every subscriber still receives `#account` and `#identity` events (gated only by `wantedDids`). Existing v1 clients work unchanged.";
-
+function jetstreamSubscribeOp(): OpenAPIV3_1.OperationObject {
+  const path = "/subscribe";
+  const url = `wss://${JETSTREAM_HOST}${path}?wantedCollections=app.bsky.feed.post`;
   const description = [
-    `**WebSocket endpoint.** This is not a regular request/response call: the connection opens as an HTTP \`GET ${path}\` with the standard \`Upgrade: websocket\` handshake (RFC 6455), then streams JSON event frames over \`wss://\` for as long as it stays open. The query parameters below are the subscription options; connect with a WebSocket client (see the samples), not the in-page test button.`,
+    `> 🔌 **WebSocket endpoint (\`wss://\`).** This is a persistent event stream, not a request/response call — connect with a WebSocket client (see the samples below), not the in-page **Test Request** button.`,
+    `The connection opens as an HTTP \`GET ${path}\` with the standard \`Upgrade: websocket\` handshake (RFC 6455), then streams JSON event frames over \`wss://${JETSTREAM_HOST}${path}\` for as long as it stays open. The query parameters below are the subscription options.`,
     "Each frame is one decoded event — `commit`, `identity`, `account`, or `sync` — for example:",
     WS_EVENT_EXAMPLE,
     "`time_us` is Jetstream's own ingest timestamp (unix microseconds); `cursor` is its monotonic per-event sequence number — save it and pass `?cursor=N` on reconnect to resume (delivery is at-least-once, so process idempotently).",
     "Clients may also send `options_update` messages to change the filter mid-stream, e.g. `{\"type\":\"options_update\",\"payload\":{\"wantedCollections\":[\"app.bsky.feed.like\"]}}`.",
-    policy,
+    // Jetstream also serves `/subscribe-v2`. Today it's wire-identical to this
+    // endpoint (same query params), differing only in delivery policy, so it's
+    // not listed separately — noted here instead.
+    "There is also a `/subscribe-v2` endpoint with the **same query parameters** as this one, differing only in delivery policy: `/subscribe` (this endpoint) preserves the original Jetstream v1 contract — every subscriber receives `#account` and `#identity` events regardless of `wantedCollections` (gated only by `wantedDids`) — whereas `/subscribe-v2` withholds `#identity` events when a collection filter is set and emits Sync 1.1 resync replacement rows. `#account` events are delivered on both. Because they're identical on the wire, only `/subscribe` is documented here.",
   ].join("\n\n");
 
-  const url = `wss://${JETSTREAM_HOST}${path}?wantedCollections=app.bsky.feed.post`;
+  // No `responses` block: this isn't a request/response operation, and a synthetic
+  // `101` rendered in a "Responses" panel just reinforces the wrong mental model.
+  // The event-frame shape lives in the description instead. render.ts relabels the
+  // method badge GET -> WSS and recolors it (see markWebsocketMethod).
   return {
-    tags: [calculateTag("network.bsky.jetstream.subscribe")],
-    summary: `${path} (WebSocket)`,
+    tags: [JETSTREAM_STREAM_TAG],
+    summary: path,
     description,
-    operationId: v2 ? "network.bsky.jetstream.subscribeV2" : "network.bsky.jetstream.subscribe",
+    operationId: "network.bsky.jetstream.subscribe",
     parameters: WS_QUERY_PARAMS,
-    responses: {
-      "101": {
-        description:
-          "Switching Protocols — the connection upgrades to a WebSocket and JSON event frames stream until either side closes it.",
-      },
-    },
     "x-codeSamples": [
       {
         lang: "shell",
@@ -369,14 +381,15 @@ function jetstreamSubscribeOp(path: string, v2: boolean): OpenAPIV3_1.OperationO
 }
 
 /**
- * Synthetic WebSocket paths injected into the Jetstream view. Cast through
+ * Synthetic WebSocket path injected into the Jetstream view. Only `/subscribe`
+ * is listed: `/subscribe-v2` is wire-identical today (same params, different
+ * delivery policy) and is noted in the description instead. Cast through
  * `unknown` for the same reason the converter loop uses `@ts-ignore` on its
  * method-keyed PathItem writes: openapi-types' V3_1 PathItemObject references the
  * V3 OperationObject, whose `exclusiveMaximum`/array typing is incompatible.
  */
 const JETSTREAM_WEBSOCKET_PATHS = {
-  "/subscribe": { get: jetstreamSubscribeOp("/subscribe", false) },
-  "/subscribe-v2": { get: jetstreamSubscribeOp("/subscribe-v2", true) },
+  "/subscribe": { get: jetstreamSubscribeOp() },
 } as unknown as OpenAPIV3_1.PathsObject;
 
 /** Schema components are shared across views (cross-namespace `$ref`s are common). */
@@ -564,7 +577,7 @@ async function main() {
   // hand-authored (see JETSTREAM_WEBSOCKET_PATHS) and merged in here alongside
   // the converted `network.bsky.jetstream.*` archive endpoints.
   Object.assign(viewPaths["jetstream"], JETSTREAM_WEBSOCKET_PATHS);
-  viewTags["jetstream"].add(calculateTag("network.bsky.jetstream.subscribe"));
+  viewTags["jetstream"].add(JETSTREAM_STREAM_TAG);
 
   // One OpenAPI document per view; the renderer surfaces them as a switcher
   // dropdown. They share the full component set (cross-namespace `$ref`s are
@@ -572,8 +585,17 @@ async function main() {
   // dangling); servers and the Introduction are per-view (see serversFor /
   // descriptionFor).
   for (const view of VIEWS) {
-    const tags = sortedTags(viewTags[view.slug]);
+    let tags = sortedTags(viewTags[view.slug]);
     const paths = viewPaths[view.slug];
+
+    // Jetstream gets no `x-tagGroups`: each of its two tags ("Live stream" and
+    // the archive namespace) holds a single set of operations, so a group layer
+    // just renders a redundant heading above each tag. Without groups, Scalar
+    // lists the tags directly; we only reorder so the live stream leads.
+    const isJetstream = view.slug === "jetstream";
+    if (isJetstream) {
+      tags = [JETSTREAM_STREAM_TAG, ...tags.filter((t) => t !== JETSTREAM_STREAM_TAG)];
+    }
 
     const api: OpenAPIV3_1.Document & { "x-tagGroups"?: unknown } = {
       openapi: "3.1.0",
@@ -595,8 +617,11 @@ async function main() {
       // those operations — see render.ts.
       paths,
       components,
-      tags: tags.map((name) => ({ name })),
-      "x-tagGroups": tagGroups(tags),
+      tags: tags.map((name) => ({
+        name,
+        ...(TAG_DESCRIPTIONS[name] ? { description: TAG_DESCRIPTIONS[name] } : {}),
+      })),
+      "x-tagGroups": isJetstream ? undefined : tagGroups(tags),
     };
 
     const output = outputFor(view.slug);
