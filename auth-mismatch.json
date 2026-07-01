@@ -1,0 +1,56 @@
+{
+  "$generated": "scripts/probe-implemented.ts (npm run probe) — queries whose lexicon claims no-auth but whose live deployment requires it (kept/listed, not unlisted; fix upstream in the lexicon or the deployment). silent-404 = unauth returns 404 XRPCNotSupported (looks unimplemented); gated-401 = unauth returns 401/403. Do not edit by hand.",
+  "probedAt": "2026-07-01T20:36:22.642Z",
+  "pds": "https://bsky.social",
+  "mismatches": [
+    {
+      "nsid": "app.bsky.graph.searchStarterPacks",
+      "host": "api.bsky.app",
+      "unauth": "404/XRPCNotSupported",
+      "authed": "200",
+      "severity": "silent-404"
+    },
+    {
+      "nsid": "com.atproto.sync.getBlocks",
+      "host": "bsky.social",
+      "unauth": "401/AuthMissing",
+      "authed": "400/InvalidRequest",
+      "severity": "gated-401"
+    },
+    {
+      "nsid": "com.atproto.sync.getLatestCommit",
+      "host": "bsky.social",
+      "unauth": "401/AuthMissing",
+      "authed": "400/RepoNotFound",
+      "severity": "gated-401"
+    },
+    {
+      "nsid": "com.atproto.sync.getRecord",
+      "host": "bsky.social",
+      "unauth": "401/AuthMissing",
+      "authed": "400/RepoNotFound",
+      "severity": "gated-401"
+    },
+    {
+      "nsid": "com.atproto.sync.getRepo",
+      "host": "bsky.social",
+      "unauth": "401/AuthMissing",
+      "authed": "400/RepoNotFound",
+      "severity": "gated-401"
+    },
+    {
+      "nsid": "com.atproto.sync.listBlobs",
+      "host": "bsky.social",
+      "unauth": "401/AuthMissing",
+      "authed": "400/RepoNotFound",
+      "severity": "gated-401"
+    },
+    {
+      "nsid": "com.atproto.sync.listRepos",
+      "host": "bsky.social",
+      "unauth": "401/AuthMissing",
+      "authed": "200",
+      "severity": "gated-401"
+    }
+  ]
+}

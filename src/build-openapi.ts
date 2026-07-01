@@ -40,6 +40,8 @@ function requiresAuth(id: string, def: any): boolean {
   if (def.type === "procedure") {
     if (id.startsWith("app.bsky.") || id.startsWith("com.atproto.repo.")) return true;
   }
+  // Falsely claims no-auth but the live deployment gates it (probe silent-404 audit).
+  if (AUTH_REQUIRED.has(id)) return true;
   const desc = String(def.description ?? "").toLowerCase();
   return desc.includes("requires auth");
 }
@@ -105,6 +107,7 @@ import {
   NAMESPACE_ORDER,
   VIEWS,
   UNIMPLEMENTED_MANIFEST,
+  AUTH_MISMATCH_MANIFEST,
   type View,
 } from "../endpoints.config";
 
@@ -136,6 +139,48 @@ const UNIMPLEMENTED: Set<string> = (() => {
     return new Set<string>();
   }
 })();
+
+/**
+ * Endpoints whose lexicon claims "Does not require auth" but whose live deployment
+ * returns `404 XRPCNotSupported` unauthenticated while serving `200` authenticated —
+ * the "silent-404" class from `npm run probe`'s auth-consistency audit (see
+ * `scripts/probe-implemented.ts`). Unlike `UNIMPLEMENTED`, these ARE implemented, so we
+ * keep the card; we just override the false no-auth claim (`overrideNoAuthClaim`) and
+ * treat them as auth-required (`requiresAuth`), which hides the misleading live
+ * test-request button. Only silent-404 is actioned — the audit's honest `401`
+ * ("gated-401") mismatches are informational and left alone. Absent manifest ⇒ no-op.
+ */
+const AUTH_REQUIRED: Set<string> = (() => {
+  const path = resolve(process.cwd(), AUTH_MISMATCH_MANIFEST);
+  if (!existsSync(path)) return new Set<string>();
+  try {
+    const data = JSON.parse(readFileSync(path, "utf8"));
+    const mismatches: any[] = Array.isArray(data.mismatches) ? data.mismatches : [];
+    return new Set<string>(
+      mismatches
+        .filter((m) => m?.severity === "silent-404" && typeof m.nsid === "string")
+        .map((m) => m.nsid as string),
+    );
+  } catch {
+    return new Set<string>();
+  }
+})();
+
+/**
+ * Rewrite a description that falsely claims the endpoint is callable without auth: drop
+ * the "Does not require auth" sentence and mark it auth-required, so the card text
+ * matches the live deployment. Called only for `AUTH_REQUIRED` ids. Self-healing: once
+ * the lexicon/deployment is reconciled upstream and the mismatch clears from the audit,
+ * the id leaves `AUTH_REQUIRED` and the original description flows through untouched.
+ */
+function overrideNoAuthClaim(def: any): void {
+  const sentences = String(def.description ?? "")
+    .split(/(?<=\.)\s+/)
+    .map((s) => s.trim())
+    .filter(Boolean);
+  const kept = sentences.filter((s) => !/does\s*n[o']?t require auth/i.test(s));
+  def.description = [...kept, "Requires auth."].join(" ").trim();
+}
 
 /** Per-view file written next to this config: `openapi.<slug>.json`. */
 function outputFor(slug: string): string {
@@ -488,6 +533,12 @@ async function main() {
       // schema defs are emitted but flagged via `deprecated: true`.
       if (isEndpoint && (containsUnspecced || isDeprecated)) {
         continue;
+      }
+
+      // Correct a false "Does not require auth" claim before the def is converted, so
+      // both the rendered description and `injectSecurity` reflect the live deployment.
+      if (isEndpoint && AUTH_REQUIRED.has(identifier)) {
+        overrideNoAuthClaim(def);
       }
 
       switch (def.type) {
