@@ -111,6 +111,7 @@ export function convertProperty(
     case "integer":
       return {
         type: "integer",
+        ...(property.description && { description: property.description }),
         ...(property.minimum !== undefined && { minimum: property.minimum }),
         ...(property.maximum !== undefined && { maximum: property.maximum }),
         ...(property.default && { default: property.default }),
@@ -126,6 +127,7 @@ export function convertProperty(
       return {
         type: "string",
         format: "binary",
+        ...(property.description && { description: property.description }),
         ...(property.maxSize !== undefined && { maxLength: property.maxSize }),
       };
     case "bytes":
@@ -141,6 +143,7 @@ export function convertProperty(
       return {
         type: "string",
         format: "cid-link",
+        ...(property.description && { description: property.description }),
       };
     case "ref":
       return {
@@ -155,6 +158,7 @@ export function convertProperty(
     case "array":
       return {
         type: "array",
+        ...(property.description && { description: property.description }),
         items: convertProperty(id, name, property.items),
         ...(property.maxLength !== undefined && {
           maxItems: property.maxLength,

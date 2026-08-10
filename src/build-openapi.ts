@@ -231,7 +231,7 @@ const JETSTREAM_DESCRIPTION = [
   "These docs covers two surfaces:",
   [
     "- **The live stream** — [`/subscribe`](#jetstream/tag/jetstream-websocket/GET/subscribe). A WebSocket of decoded JSON events, filterable by collection and DID.",
-    "- **The archive** — the `network.bsky.jetstream.*` XRPC methods below. HTTP queries/procedures for planning and downloading the sealed binary archive.",
+    "- **The replay archive** — the `network.bsky.jetstream.*` XRPC methods below. HTTP queries/procedures for planning and downloading the sealed binary archive, whether you're replaying history before cutting over to the live stream or taking a point-in-time snapshot.",
   ].join("\n"),
   "## Hosts and scope",
   `The Bluesky-hosted instances are at \`jetstream.us-west.bsky.network\` and \`jetstream.us-east.bsky.network\`.`,

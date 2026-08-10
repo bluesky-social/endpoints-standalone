@@ -25,9 +25,31 @@ Until then these are maintained **by hand**: if the lexicons change in
 
 ## Current contents
 
-- `network/bsky/jetstream/*.json` — the Jetstream v2 archive/backfill XRPC
-  methods (`getSegment`, `getBlock`, `getTombstones`, `listSegments`,
-  `planBackfill`). Source of truth: the `bluesky-social/jetstream` repo.
-  Note the live websocket stream (`/subscribe`, `/subscribe-v2`) has **no**
-  lexicon — it is documented via hand-authored OpenAPI paths in
-  `build-openapi.ts` (`JETSTREAM_WEBSOCKET_PATHS`).
+- `network/bsky/jetstream/*.json` — the Jetstream v2 replay-archive XRPC methods
+  (`planBackfill`, `listSegments`, `getSegment`, `getBlock`). Source of truth:
+  `../jetstream/lexicons/network/bsky/jetstream/`.
+  Note the live websocket stream has **no** lexicon — it is documented via
+  hand-authored OpenAPI paths in `build-openapi.ts`
+  (`JETSTREAM_WEBSOCKET_PATHS`), which cover `/subscribe` only.
+
+## Upstream lexicons deliberately NOT vendored
+
+`../jetstream/lexicons/` holds three more methods that we intentionally don't
+list. If you re-sync this directory, don't "helpfully" copy them in:
+
+- `importTimestamps` / `getImportStatus` — **operator-only.** Registered only
+  when the server is started with an import manager, and bearer-gated (401 by
+  default), so they aren't public API surface. Verified against
+  `jetstream.us-west.bsky.network`: `getImportStatus` returns `401 AuthRequired`.
+- `getZstdDictionary` — **`/subscribe-v2` only.** It serves the v2 shared
+  dict-zstd dictionary, opted into with `zstdDictionary=<id>`. `/subscribe`
+  (v1, wire-frozen) uses `compress=true` with a *different*, legacy embedded
+  dictionary that this method does not serve. Since we document `/subscribe`
+  alone, listing it would leave it with no documented consumer. Re-add it if
+  and when `/subscribe-v2` gets a card.
+
+## Removed upstream
+
+- `getTombstones` — **deleted upstream.** Deletion markers now ride inline in
+  the blocks named by `planBackfill`; there is no separate tombstone fetch.
+  The live host returns `501 MethodNotImplemented`.
