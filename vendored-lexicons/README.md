@@ -25,31 +25,34 @@ Until then these are maintained **by hand**: if the lexicons change in
 
 ## Current contents
 
-- `network/bsky/jetstream/*.json` — the Jetstream v2 replay-archive XRPC methods
-  (`planBackfill`, `listSegments`, `getSegment`, `getBlock`). Source of truth:
-  `../jetstream/lexicons/network/bsky/jetstream/`.
-  Note the live websocket stream has **no** lexicon — it is documented via
-  hand-authored OpenAPI paths in `build-openapi.ts`
-  (`JETSTREAM_WEBSOCKET_PATHS`), which cover `/subscribe` only.
+- `network/bsky/jetstream/*.json` — the Jetstream replay-archive XRPC methods
+  (`planSnapshot`, `listSegments`, `getSegment`, `getBlock`). Source of truth:
+  `../jetstream/lexicons/network/bsky/jetstream/`. Last re-synced 2026-08-12.
+  The live websocket stream is documented separately, via hand-authored OpenAPI
+  paths in `build-openapi.ts` (`JETSTREAM_WEBSOCKET_PATHS`) covering `/subscribe`.
 
 ## Upstream lexicons deliberately NOT vendored
 
-`../jetstream/lexicons/` holds three more methods that we intentionally don't
+`../jetstream/lexicons/` holds four more schemas that we intentionally don't
 list. If you re-sync this directory, don't "helpfully" copy them in:
 
+- `subscribeEvents` — **a `subscription` def, which the converter skips**
+  (`build-openapi.ts`: event streams have no OpenAPI representation). Vendoring
+  it would add its message-payload objects as components and still produce no
+  card, so the live stream stays hand-authored instead.
 - `importTimestamps` / `getImportStatus` — **operator-only.** Registered only
   when the server is started with an import manager, and bearer-gated (401 by
   default), so they aren't public API surface. Verified against
   `jetstream.us-west.bsky.network`: `getImportStatus` returns `401 AuthRequired`.
-- `getZstdDictionary` — **`/subscribe-v2` only.** It serves the v2 shared
-  dict-zstd dictionary, opted into with `zstdDictionary=<id>`. `/subscribe`
-  (v1, wire-frozen) uses `compress=true` with a *different*, legacy embedded
-  dictionary that this method does not serve. Since we document `/subscribe`
-  alone, listing it would leave it with no documented consumer. Re-add it if
-  and when `/subscribe-v2` gets a card.
+- `getZstdDictionary` — serves the shared dict-zstd dictionary that the
+  `zstdDictionary=<id>` stream option opts into. That option belongs to the
+  `subscribeEvents` wire, which has no card, so listing this method would leave
+  it with no documented consumer. The documented `/subscribe` stream's
+  `compress=true` uses a *different*, embedded dictionary that this method does
+  not serve.
 
 ## Removed upstream
 
 - `getTombstones` — **deleted upstream.** Deletion markers now ride inline in
-  the blocks named by `planBackfill`; there is no separate tombstone fetch.
+  the blocks named by `planSnapshot`; there is no separate tombstone fetch.
   The live host returns `501 MethodNotImplemented`.

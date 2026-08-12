@@ -60,11 +60,12 @@ out/  (index.html + openapi.<view>.json + scalar.standalone.js — fully self-co
 - **Jetstream is a partial special case.** Jetstream's archive/backfill methods are
   ordinary XRPC and convert like everything else, but two things differ: (1) their
   lexicons aren't on-network yet, so they're hand-vendored under `vendored-lexicons/`
-  (build globs both that and `lexicons/`); (2) the live stream (`/subscribe`,
-  `/subscribe-v2`) is a WebSocket with no Lexicon, so it's documented via
-  hand-authored OpenAPI GET cards (`JETSTREAM_WEBSOCKET_PATHS` in `build-openapi.ts`)
-  — the handshake genuinely is a GET, the query params are the real subscription
-  options, and `render.ts` hides their (meaningless) in-page test button.
+  (build globs both that and `lexicons/`); (2) the live stream (`/subscribe`) is a
+  WebSocket, which OpenAPI can't model and the converter skips, so it's documented
+  via a hand-authored OpenAPI GET card (`JETSTREAM_WEBSOCKET_PATHS` in
+  `build-openapi.ts`) — the handshake genuinely is a GET, the query params are the
+  real subscription options, and `render.ts` hides its (meaningless) in-page test
+  button.
 - **Bluesky-first ordering:** within each view, `NAMESPACE_ORDER` biases
   `app.bsky.*` and `com.atproto.*` ahead of the rest (rendered via OpenAPI
   `x-tagGroups`). Shared auth/proxy guidance lives in the OpenAPI `info.description`

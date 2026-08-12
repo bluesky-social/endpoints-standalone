@@ -347,14 +347,6 @@ const WS_QUERY_PARAMS: OpenAPIV3_1.ParameterObject[] = [
     schema: { type: "integer", format: "int64", minimum: 0 },
   },
   {
-    name: "extended",
-    in: "query",
-    required: false,
-    description:
-      "Set `true` for the extended payload: a strict superset adding `seq`, `upstream_relay_cursor`, `commit.record_cbor` (base64 DAG-CBOR), `sync.blocks` (base64 CAR), and interleaved control events (`segment_sealed`, `segment_compacted`, `heartbeat`). Heavier to produce and may be more strictly rate-limited.",
-    schema: { type: "boolean", default: false },
-  },
-  {
     name: "maxMessageSizeBytes",
     in: "query",
     required: false,
