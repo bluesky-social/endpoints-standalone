@@ -1,6 +1,6 @@
 {
-  "$generated": "scripts/probe-implemented.ts (npm run probe) — com.atproto queries the live network answers with 501 MethodNotImplemented. Do not edit by hand.",
-  "probedAt": "2026-06-12T18:23:36.001Z",
+  "$generated": "scripts/probe-implemented.ts (npm run probe) — specced queries the live network doesn't serve (com.atproto via 501 MethodNotImplemented, app.bsky via 404 XRPCNotSupported). Do not edit by hand.",
+  "probedAt": "2026-07-01T20:36:21.592Z",
   "pds": "https://bsky.social",
   "authenticated": true,
   "unimplemented": [

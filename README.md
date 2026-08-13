@@ -50,9 +50,22 @@ out/  (index.html + openapi.<view>.json + scalar.standalone.js — fully self-co
   never fired at the live network. See the `PROBE_*` note in `endpoints.config.ts`.
 - **Split into views.** `VIEWS` in `endpoints.config.ts` partitions the namespaces
   into separate OpenAPI documents — Bluesky App (`app.bsky.*` + `com.atproto.*`),
-  Bluesky DMs (`chat.bsky.*`), and Ozone Moderation (`tools.ozone.*`) — each written
-  as `openapi.<slug>.json`. The renderer surfaces them via Scalar's multi-source
-  switcher (the dropdown in the top left). All views share the same Introduction.
+  Bluesky DMs (`chat.bsky.*`), Ozone Moderation (`tools.ozone.*`), and Jetstream API
+  (`network.bsky.jetstream.*`) — each written as `openapi.<slug>.json`. The renderer
+  surfaces them via Scalar's multi-source switcher (the dropdown in the top left).
+  Each view gets its own servers (`serversFor`) and Introduction (`descriptionFor`):
+  the relay (`https://bsky.network`) is offered on any view with `com.atproto.sync.*`
+  (the only public host that serves those — the AppView `501`s them, the PDS
+  auth-gates them); Jetstream points at its own hosts.
+- **Jetstream is a partial special case.** Jetstream's archive/backfill methods are
+  ordinary XRPC and convert like everything else, but two things differ: (1) their
+  lexicons aren't on-network yet, so they're hand-vendored under `vendored-lexicons/`
+  (build globs both that and `lexicons/`); (2) the live stream (`/subscribe`) is a
+  WebSocket, which OpenAPI can't model and the converter skips, so it's documented
+  via a hand-authored OpenAPI GET card (`JETSTREAM_WEBSOCKET_PATHS` in
+  `build-openapi.ts`) — the handshake genuinely is a GET, the query params are the
+  real subscription options, and `render.ts` hides its (meaningless) in-page test
+  button.
 - **Bluesky-first ordering:** within each view, `NAMESPACE_ORDER` biases
   `app.bsky.*` and `com.atproto.*` ahead of the rest (rendered via OpenAPI
   `x-tagGroups`). Shared auth/proxy guidance lives in the OpenAPI `info.description`
@@ -105,4 +118,10 @@ with the app password stored as a CI secret.
   loopback-DNS bug that breaks `lex`'s `_lexicon.*` TXT lookups). It is a no-op on
   healthy systems, including Linux CI.
 - `openapi.*.json` and `out/` are git-ignored; they are regenerated from the
-  committed `lexicons/` + `lexicons.json`.
+  committed `lexicons/` + `lexicons.json` (and the committed `vendored-lexicons/`).
+- `vendored-lexicons/` holds lexicons that aren't resolvable on-network yet
+  (currently Jetstream's `network.bsky.jetstream.*`), hand-copied from their source
+  repo. It's a stopgap — `seed-allowlist.ts` `rmSync`s `lexicons/` every run, so
+  these can't live there. **TODO:** once those schemas are published on-network, add
+  their authority DID to `SCHEMA_AUTHORITIES` and drop the vendored copies. See
+  `vendored-lexicons/README.md`.

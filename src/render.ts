@@ -144,20 +144,78 @@ const HTML = `<!doctype html>
           container.appendChild(a);
         }
 
-        function hideAuthTestButtons(root) {
+        // The Jetstream live-stream card (/subscribe) is a synthetic GET operation
+        // whose connection upgrades to a WebSocket. We (1) hide its Test Request
+        // button (a plain in-page GET would just fail) and (2) relabel + recolor
+        // the method badge GET -> WSS so it reads as the WebSocket endpoint it is.
+        //
+        // Detection is by PATH, not by tag name: walking up from a badge/button,
+        // the nearest ancestor that mentions a path tells us which op it is — the
+        // live stream shows "/subscribe", every archive/XRPC op shows "/xrpc/".
+        // (An earlier version keyed off the tag-slug section id and broke when the
+        // tag's wording was edited; the path is stable.) Plain indexOf, never a
+        // regex — this whole page is a JS template literal, so a regex literal's
+        // backslashes get eaten before they reach the browser.
+        var WSS_COLOR = '#8b5cf6'; // violet — distinct from GET/POST/etc.
+
+        function belongsToWebsocketOp(el) {
+          var node = el;
+          for (var i = 0; i < 10 && node; i++) {
+            var txt = node.textContent || '';
+            if (txt.indexOf('/xrpc/') !== -1) return false;   // an archive/XRPC op
+            if (txt.indexOf('/subscribe') !== -1) return true; // the live stream
+            node = node.parentElement;
+          }
+          return false;
+        }
+
+        function hideUntestableButtons(root) {
           var sections = (root || document).querySelectorAll('section.section');
           for (var i = 0; i < sections.length; i++) {
             var section = sections[i];
             var btn = section.querySelector('.show-api-client-button');
             if (!btn) continue;
             var hasBadge = !!section.querySelector('.security-requirement-badge');
-            btn.style.display = hasBadge ? 'none' : '';
+            btn.style.display = (hasBadge || belongsToWebsocketOp(btn)) ? 'none' : '';
+          }
+        }
+
+        // Rewrite the GET pill to WSS everywhere it appears for the live-stream
+        // card. Scalar renders the method verb in three element shapes:
+        //   - operation header (.request-method) and tag-overview "category head"
+        //     (.endpoint-method): a plain text node, color via an inline color.
+        //   - sidebar nav entry (.sidebar-heading-type): a visible text node
+        //     preceded by an sr-only label, color via a --method-color CSS prop.
+        // setWss handles all: it rewrites only the visible (non-empty) text node
+        // — preserving any sr-only span — and sets every color hook we've seen.
+        // Guarded on text so the edit doesn't churn the observer.
+        function setWss(el) {
+          var changed = false;
+          for (var n = 0; n < el.childNodes.length; n++) {
+            var node = el.childNodes[n];
+            if (node.nodeType === 3 && node.nodeValue.trim()) {
+              changed = true;
+              if (node.nodeValue.trim().toLowerCase() !== 'wss') node.nodeValue = 'wss';
+            }
+          }
+          if (!changed && el.textContent.trim().toLowerCase() !== 'wss') el.textContent = 'wss';
+          el.style.color = WSS_COLOR;
+          el.style.setProperty('--method-color', WSS_COLOR);
+        }
+
+        function markWebsocketMethod(root) {
+          var badges = (root || document).querySelectorAll(
+            '.request-method, .endpoint-method, .sidebar-heading-type',
+          );
+          for (var i = 0; i < badges.length; i++) {
+            if (belongsToWebsocketOp(badges[i])) setWss(badges[i]);
           }
         }
 
         function tick() {
           ensureDocsLink();
-          hideAuthTestButtons();
+          hideUntestableButtons();
+          markWebsocketMethod();
         }
 
         // Scalar mounts the sidebar and operations asynchronously and may

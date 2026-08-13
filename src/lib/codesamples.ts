@@ -62,6 +62,11 @@ function exampleString(name: string): string {
       return "3jxf7z2k3q2";
     case "collection":
       return "app.bsky.feed.post";
+    // Jetstream archive params (network.bsky.jetstream.*).
+    case "segment":
+      return "seg_000000002a.jss";
+    case "blockIndex":
+      return "0";
     case "cid":
       return "bafyrei...";
     case "uri":
@@ -185,39 +190,44 @@ function proxyHeaderFor(id: string): string | null {
   return null;
 }
 
-function curlQuerySample(id: string, def: any): string {
+/** Render a curl invocation with a trailing-backslash-joined header list. */
+function curlWithHeaders(first: string, headers: string[]): string {
+  if (headers.length === 0) return first;
+  const lines = [`${first} \\`];
+  headers.forEach((h, i) => {
+    lines.push(`  -H '${h}'${i < headers.length - 1 ? " \\" : ""}`);
+  });
+  return lines.join("\n");
+}
+
+function curlQuerySample(id: string, def: any, host = "bsky.social", auth = true): string {
   const props: Record<string, Property> = def?.parameters?.properties ?? {};
   const entries = Object.entries(props);
   const qs = entries
     .map(([name, p]) => `${encodeURIComponent(name)}=${encodeURIComponent(shellValue(name, p))}`)
     .join("&");
-  const url = `https://bsky.social/xrpc/${id}${qs ? `?${qs}` : ""}`;
+  const url = `https://${host}/xrpc/${id}${qs ? `?${qs}` : ""}`;
+  const headers: string[] = [];
+  if (auth) headers.push("Authorization: Bearer <TOKEN>");
   const proxy = proxyHeaderFor(id);
-  const lines = [`curl '${url}' \\`, `  -H 'Authorization: Bearer <TOKEN>'`];
-  if (proxy) lines[lines.length - 1] += ` \\`;
-  if (proxy) lines.push(`  -H 'atproto-proxy: ${proxy}'`);
-  return lines.join("\n");
+  if (proxy) headers.push(`atproto-proxy: ${proxy}`);
+  return curlWithHeaders(`curl '${url}'`, headers);
 }
 
-function curlProcedureSample(id: string, def: any): string {
-  const url = `https://bsky.social/xrpc/${id}`;
+function curlProcedureSample(id: string, def: any, host = "bsky.social", auth = true): string {
+  const url = `https://${host}/xrpc/${id}`;
   const proxy = proxyHeaderFor(id);
-  const proxyLine = proxy ? `  -H 'atproto-proxy: ${proxy}' \\` : null;
+  const authHeaders: string[] = [];
+  if (auth) authHeaders.push("Authorization: Bearer <TOKEN>");
+  if (proxy) authHeaders.push(`atproto-proxy: ${proxy}`);
   const encoding: string | undefined = def?.input?.encoding;
   if (!encoding) {
-    const lines = [`curl -X POST '${url}' \\`];
-    if (proxyLine) lines.push(proxyLine);
-    lines.push(`  -H 'Authorization: Bearer <TOKEN>'`);
-    return lines.join("\n");
+    return curlWithHeaders(`curl -X POST '${url}'`, authHeaders);
   }
   if (encoding !== "application/json") {
     const lines = [`curl -X POST '${url}' \\`];
-    if (proxyLine) lines.push(proxyLine);
-    lines.push(
-      `  -H 'Authorization: Bearer <TOKEN>' \\`,
-      `  -H 'Content-Type: ${encoding}' \\`,
-      `  --data-binary @<file>`,
-    );
+    authHeaders.forEach((h) => lines.push(`  -H '${h}' \\`));
+    lines.push(`  -H 'Content-Type: ${encoding}' \\`, `  --data-binary @<file>`);
     return lines.join("\n");
   }
   const props: Record<string, Property> = def?.input?.schema?.properties ?? {};
@@ -245,12 +255,8 @@ function curlProcedureSample(id: string, def: any): string {
     ? JSON.stringify(body, null, 2).replace(/'/g, "'\\''")
     : "{}";
   const lines = [`curl -X POST '${url}' \\`];
-  if (proxyLine) lines.push(proxyLine);
-  lines.push(
-    `  -H 'Authorization: Bearer <TOKEN>' \\`,
-    `  -H 'Content-Type: application/json' \\`,
-    `  -d '${json}'`,
-  );
+  authHeaders.forEach((h) => lines.push(`  -H '${h}' \\`));
+  lines.push(`  -H 'Content-Type: application/json' \\`, `  -d '${json}'`);
   return lines.join("\n");
 }
 
@@ -287,15 +293,40 @@ function goProcedureSample(id: string, def: any): string {
   ].join("\n");
 }
 
-export function codeSamplesFor(id: string, def: any): Sample[] {
+/**
+ * Options for code-sample generation.
+ *
+ * - `curlHost` overrides the host the curl sample targets. Defaults to
+ *   `bsky.social` (the PDS), which is right for the SDK-backed namespaces.
+ *   Jetstream's archive XRPC lives on its own host, so the build passes
+ *   `jetstream.us-west.bsky.network`.
+ * - `only` restricts the emitted languages. Used for namespaces that have no
+ *   indigo/`@atproto/lex` codegen wrapper yet (e.g. `network.bsky.jetstream.*`),
+ *   where the TypeScript/Go snippets would reference modules that don't exist —
+ *   so the build asks for `["shell"]` only.
+ */
+export interface CodeSampleOptions {
+  curlHost?: string;
+  only?: Array<Sample["lang"]>;
+  /** Include an `Authorization: Bearer` header in the curl sample. Defaults to
+   *  true (SDK-backed PDS endpoints); set false for unauthenticated surfaces
+   *  like the public Jetstream archive XRPC. */
+  auth?: boolean;
+}
+
+export function codeSamplesFor(id: string, def: any, opts: CodeSampleOptions = {}): Sample[] {
   const isQuery = def?.type === "query";
+  const auth = opts.auth ?? true;
   const ts = isQuery ? tsQuerySample(id, def) : tsProcedureSample(id, def);
   const go = isQuery ? goQuerySample(id, def) : goProcedureSample(id, def);
-  const curl = isQuery ? curlQuerySample(id, def) : curlProcedureSample(id, def);
+  const curl = isQuery
+    ? curlQuerySample(id, def, opts.curlHost, auth)
+    : curlProcedureSample(id, def, opts.curlHost, auth);
   const samples: Sample[] = [
     { lang: "typescript", label: "TypeScript (@atproto/lex)", source: ts },
   ];
   if (go) samples.push({ lang: "go", label: "Go (indigo)", source: go });
   samples.push({ lang: "shell", label: "Shell (curl)", source: curl });
+  if (opts.only) return samples.filter((s) => opts.only!.includes(s.lang));
   return samples;
 }
