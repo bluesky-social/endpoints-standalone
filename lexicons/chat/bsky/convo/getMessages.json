@@ -28,6 +28,14 @@
                 ],
                 "type": "union"
               }
+            },
+            "relatedProfiles": {
+              "type": "array",
+              "items": {
+                "ref": "chat.bsky.actor.defs#profileViewBasic",
+                "type": "ref"
+              },
+              "description": "Set of all members who authored or reacted to the returned messages. Members referred to by system messages are also included."
             }
           }
         },
