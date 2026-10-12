@@ -34,7 +34,7 @@
           "name": "BlockedActor"
         },
         {
-          "name": "GroupInvitesDisabled"
+          "name": "BlockedSubject"
         },
         {
           "name": "ConvoLocked"
@@ -53,6 +53,9 @@
         },
         {
           "name": "RecipientNotFound"
+        },
+        {
+          "name": "UserForbidsGroups"
         }
       ],
       "output": {
@@ -65,12 +68,19 @@
             "convo": {
               "ref": "chat.bsky.convo.defs#convoView",
               "type": "ref"
+            },
+            "addedMembers": {
+              "type": "array",
+              "items": {
+                "ref": "chat.bsky.actor.defs#profileViewBasic",
+                "type": "ref"
+              }
             }
           }
         },
         "encoding": "application/json"
       },
-      "description": "[NOTE: This is under active development and should be considered unstable while this note is here]. Adds members to a group. The members are added in 'request' status, so they have to accept it. This creates convo memberships."
+      "description": "Adds members to a group. The members are added in 'request' status, so they have to accept it. This creates convo memberships."
     }
   },
   "$type": "com.atproto.lexicon.schema",
