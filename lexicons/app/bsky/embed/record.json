@@ -66,6 +66,7 @@
             "refs": [
               "app.bsky.embed.images#view",
               "app.bsky.embed.video#view",
+              "app.bsky.embed.gallery#view",
               "app.bsky.embed.external#view",
               "app.bsky.embed.record#view",
               "app.bsky.embed.recordWithMedia#view"
@@ -95,6 +96,14 @@
         },
         "repostCount": {
           "type": "integer"
+        },
+        "opThreadPostCount": {
+          "type": "integer",
+          "description": "The total number of posts in the contiguous OP thread that this post belongs to. Only present when this post is part of the OP thread."
+        },
+        "opThreadPostIndex": {
+          "type": "integer",
+          "description": "The 1-indexed position of this post within the contiguous OP thread. Only present when this post is part of the OP thread."
         }
       }
     },
