@@ -1,22 +1,17 @@
 {
-  "id": "chat.bsky.group.getGroupPublicInfo",
+  "id": "tools.ozone.moderation.getAccountPreferences",
   "defs": {
     "main": {
       "type": "query",
-      "errors": [
-        {
-          "name": "InvalidCode"
-        }
-      ],
       "output": {
         "schema": {
           "type": "object",
           "required": [
-            "group"
+            "preferences"
           ],
           "properties": {
-            "group": {
-              "ref": "chat.bsky.group.defs#groupPublicView",
+            "preferences": {
+              "ref": "app.bsky.actor.defs#preferences",
               "type": "ref"
             }
           }
@@ -26,15 +21,16 @@
       "parameters": {
         "type": "params",
         "required": [
-          "code"
+          "did"
         ],
         "properties": {
-          "code": {
-            "type": "string"
+          "did": {
+            "type": "string",
+            "format": "did"
           }
         }
       },
-      "description": "[NOTE: This is under active development and should be considered unstable while this note is here]. Get public information about a group from an join link."
+      "description": "Get private preferences for an account. Requires moderator or admin auth."
     }
   },
   "$type": "com.atproto.lexicon.schema",

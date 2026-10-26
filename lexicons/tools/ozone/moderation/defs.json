@@ -112,6 +112,22 @@
         }
       }
     },
+    "convoView": {
+      "type": "object",
+      "required": [
+        "did",
+        "convoId"
+      ],
+      "properties": {
+        "did": {
+          "type": "string",
+          "format": "did"
+        },
+        "convoId": {
+          "type": "string"
+        }
+      }
+    },
     "moderation": {
       "type": "object",
       "properties": {
@@ -197,6 +213,10 @@
         "comment": {
           "type": "string",
           "description": "Additional comment about added/removed tags."
+        },
+        "durationInHours": {
+          "type": "integer",
+          "description": "Indicates how long the tags being added should remain before automatically being removed. Only applies to tags being added."
         }
       },
       "description": "Add/Remove a tag on a subject"
@@ -404,7 +424,8 @@
           "refs": [
             "com.atproto.admin.defs#repoRef",
             "com.atproto.repo.strongRef",
-            "chat.bsky.convo.defs#messageRef"
+            "chat.bsky.convo.defs#messageRef",
+            "chat.bsky.convo.defs#convoRef"
           ],
           "type": "union"
         },
@@ -756,9 +777,24 @@
           "ref": "com.atproto.moderation.defs#reasonType",
           "type": "ref"
         },
+        "appealLabel": {
+          "type": "string"
+        },
+        "appealActionId": {
+          "type": "integer"
+        },
         "isReporterMuted": {
           "type": "boolean",
           "description": "Set to true if the reporter was muted from reporting at the time of the event. These reports won't impact the reviewState of the subject."
+        },
+        "appealActionType": {
+          "type": "string",
+          "description": "Action reference type recorded when this appeal was submitted."
+        },
+        "appealSubmittedBy": {
+          "type": "string",
+          "format": "did",
+          "description": "Moderator who submitted this appeal on behalf of the affected account. Returned by moderator event APIs."
         }
       },
       "description": "Report a subject"
@@ -1086,7 +1122,8 @@
           "refs": [
             "com.atproto.admin.defs#repoRef",
             "com.atproto.repo.strongRef",
-            "chat.bsky.convo.defs#messageRef"
+            "chat.bsky.convo.defs#messageRef",
+            "chat.bsky.convo.defs#convoRef"
           ],
           "type": "union"
         },
@@ -1245,7 +1282,8 @@
             "#repoView",
             "#repoViewNotFound",
             "#recordView",
-            "#recordViewNotFound"
+            "#recordViewNotFound",
+            "#convoView"
           ],
           "type": "union"
         },
