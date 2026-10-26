@@ -25,7 +25,7 @@
           "description": "Who added this member. Only present if the member was added (instead of joining via link)."
         }
       },
-      "description": "[NOTE: This is under active development and should be considered unstable while this note is here]."
+      "description": "A current group convo member."
     },
     "profileViewBasic": {
       "type": "object",
@@ -41,7 +41,8 @@
         "kind": {
           "refs": [
             "#directConvoMember",
-            "#groupConvoMember"
+            "#groupConvoMember",
+            "#pastGroupConvoMember"
           ],
           "type": "union",
           "description": "Union field that has data specific to different kinds of convos."
@@ -90,8 +91,13 @@
     },
     "directConvoMember": {
       "type": "object",
+      "properties": {}
+    },
+    "pastGroupConvoMember": {
+      "type": "object",
+      "required": [],
       "properties": {},
-      "description": "[NOTE: This is under active development and should be considered unstable while this note is here]."
+      "description": "A past group convo member."
     }
   },
   "$type": "com.atproto.lexicon.schema",
